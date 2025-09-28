@@ -5,7 +5,7 @@ import mimetypes
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Iterable, Optional, Sequence
 
 try:
     import google.generativeai as genai  # type: ignore
@@ -16,6 +16,14 @@ except ImportError:  # pragma: no cover - optional dependency
 
 
 LOGGER = logging.getLogger(__name__)
+
+
+_FALLBACK_MODELS: Sequence[dict[str, str]] = (
+    {"name": "gemini-pro", "display_name": "Gemini Pro"},
+    {"name": "gemini-pro-vision", "display_name": "Gemini Pro Vision"},
+    {"name": "gemini-flash-1.5-latest", "display_name": "Gemini Flash 1.5"},
+    {"name": "gemini-flash-latest", "display_name": "Gemini Flash"},
+)
 
 
 @dataclass
@@ -81,3 +89,38 @@ class TutorLLMClient:
             mime_type = "image/png"
         data = image_path.read_bytes()
         return {"mime_type": mime_type, "data": data}
+
+
+def list_available_models() -> list[dict[str, str]]:
+    """Return Gemini models that support content generation."""
+
+    if genai is None:
+        LOGGER.warning("google-generativeai library not available; using fallback model list")
+        return list(_FALLBACK_MODELS)
+
+    api_key = os.getenv("GEMINI_API")
+    if not api_key:
+        LOGGER.warning("GEMINI_API not set; using fallback model list")
+        return list(_FALLBACK_MODELS)
+
+    try:
+        genai.configure(api_key=api_key)
+        models = []
+        for model in genai.list_models():
+            supported = getattr(model, "supported_generation_methods", [])
+            if "generateContent" not in supported:
+                continue
+            models.append({
+                "name": getattr(model, "name", ""),
+                "display_name": getattr(model, "display_name", getattr(model, "name", "")),
+                "description": getattr(model, "description", ""),
+            })
+    except Exception as exc:  # pragma: no cover - network/API failure
+        LOGGER.exception("Failed to list Gemini models: %s", exc)
+        return list(_FALLBACK_MODELS)
+
+    cleaned = [m for m in models if m.get("name")]
+    if not cleaned:
+        LOGGER.warning("No models returned from API; using fallback list")
+        return list(_FALLBACK_MODELS)
+    return cleaned

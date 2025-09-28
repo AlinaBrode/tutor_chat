@@ -69,3 +69,33 @@ Dialogue so far:
 Your task is to come up with the next message to a student.
 
 ```
+
+# List of models
+* on the application start query Google for the list of available models
+* in "configuration" page provide a list of available models to user to select from
+
+
+# Home task estimation
+
+## Placement
+* one more button: "Estimate"
+* opens/closes panel with student's work estimation
+* parameters to set
+  * task description (optional)
+  * task description image (optional)
+  * student's work (optional)
+  * student's work image (optional)
+* button "Estimate"
+* fields to show result:
+  * model's estimation (1-5) points
+  * model's feedback
+
+
+## Logic of work
+* takes jinja template for student's work estimation
+* substitutes variables in the template
+* sends prompt to LLM
+* get's LLM reaction
+  * parse model's reaction, extract next word after "score", place it into "score" field
+  * the whole model's response put into "estimation" field of the form
+  * make log entry for work estimation on the same level as dialog 

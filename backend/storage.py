@@ -12,8 +12,11 @@ CONVERSATIONS_DIR = DATA_DIR / "conversations"
 UPLOADS_DIR = DATA_DIR / "uploads"
 LOG_PATH = DATA_DIR / "conversations.log"
 
+ESTIMATION_UPLOADS_DIR = UPLOADS_DIR / "estimations"
+
 CONVERSATIONS_DIR.mkdir(parents=True, exist_ok=True)
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+ESTIMATION_UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 LOG_PATH.touch(exist_ok=True)
 
 _log_lock = Lock()
@@ -29,7 +32,9 @@ def _conversation_path(conversation_id: str) -> Path:
 
 
 def create_conversation(prompt_template: str, task_text: str | None = None,
-                        task_image: str | None = None, solution_image: str | None = None,
+                        task_image: str | None = None, task_image_original: str | None = None,
+                        solution_image: str | None = None,
+                        solution_image_original: str | None = None,
                         conversation_id: str | None = None) -> Dict:
     conversation_id = conversation_id or uuid.uuid4().hex
     conversation = {
@@ -38,7 +43,9 @@ def create_conversation(prompt_template: str, task_text: str | None = None,
         "prompt_template": prompt_template,
         "task": task_text or "",
         "task_image": task_image,
+        "task_image_original_name": task_image_original,
         "solution_image": solution_image,
+        "solution_image_original_name": solution_image_original,
         "messages": []
     }
 
@@ -50,7 +57,9 @@ def create_conversation(prompt_template: str, task_text: str | None = None,
         "prompt_template": prompt_template,
         "task": task_text,
         "task_image": task_image,
-        "solution_image": solution_image
+        "task_image_original_name": task_image_original,
+        "solution_image": solution_image,
+        "solution_image_original_name": solution_image_original,
     })
 
     return conversation
@@ -99,3 +108,12 @@ def _append_log_entry(entry: Dict) -> None:
     with _log_lock:
         with LOG_PATH.open("a", encoding="utf-8") as fp:
             fp.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+def log_estimation(estimation_id: str, payload: Dict) -> None:
+    entry = {
+        "event": "estimation_performed",
+        "estimation_id": estimation_id,
+        **payload,
+    }
+    _append_log_entry(entry)

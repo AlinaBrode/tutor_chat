@@ -21,6 +21,7 @@
     <div class="header-actions">
       <button id="start-dialog-btn" class="primary">Начать новый диалог</button>
       <button id="toggle-config-btn">Настройки</button>
+      <button id="toggle-estimation-btn">Оценить работу</button>
     </div>
   </header>
 
@@ -39,17 +40,55 @@
         <h2>Настройки</h2>
         <label>
           Модель
-          <input type="text" name="model.name" id="model-name" required>
+          <select name="model.name" id="model-name" required>
+            <option value="" disabled selected>Загрузка списка моделей…</option>
+          </select>
         </label>
         <p class="hint">API ключ берётся из переменной окружения GEMINI_API на сервере.</p>
         <label>
           Промпт (шаблон Jinja)
           <textarea name="prompt_template" id="prompt-template" rows="12" required></textarea>
         </label>
+        <label>
+          Шаблон оценки (Jinja)
+          <textarea name="estimation_template" id="estimation-template" rows="12" required></textarea>
+        </label>
+        <p class="hint">Переменные оценки: {{task}}, {{task_image}}, {{student_work}}, {{student_work_image}}</p>
         <div class="config-actions">
           <button type="submit" class="primary">Сохранить</button>
         </div>
         <p class="hint">Переменные: {{task}}, {{task_image}}, {{solution_image}}, {{dialogue_turns}}</p>
+      </form>
+    </aside>
+
+    <aside id="estimation-panel" class="config-panel hidden estimation-panel">
+      <form id="estimation-form">
+        <h2>Оценка работы</h2>
+        <label>
+          Описание задания
+          <textarea name="task" id="estimation-task" rows="4" placeholder="Текст задания"></textarea>
+        </label>
+        <label>
+          Изображение задания
+          <input type="file" name="task_image" id="estimation-task-image" accept="image/*">
+        </label>
+        <label>
+          Работа ученика
+          <textarea name="student_work" id="estimation-student" rows="6" placeholder="Описание решения"></textarea>
+        </label>
+        <label>
+          Изображение работы ученика
+          <input type="file" name="student_work_image" id="estimation-student-image" accept="image/*">
+        </label>
+        <div class="config-actions">
+          <button type="submit" class="primary">Оценить</button>
+        </div>
+        <div class="estimation-result">
+          <p><strong>Баллы:</strong> <span id="estimation-score">—</span></p>
+          <p><strong>Обратная связь:</strong></p>
+          <div id="estimation-feedback" class="estimation-feedback">—</div>
+        </div>
+        <p class="hint">Шаблон берётся из настройки estimation_template. Ответ должен содержать строку "score".</p>
       </form>
     </aside>
   </main>

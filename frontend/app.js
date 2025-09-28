@@ -4,16 +4,118 @@ document.addEventListener('DOMContentLoaded', () => {
   const sendBtn = document.getElementById('send-btn');
   const startDialogBtn = document.getElementById('start-dialog-btn');
   const toggleConfigBtn = document.getElementById('toggle-config-btn');
+  const toggleEstimationBtn = document.getElementById('toggle-estimation-btn');
   const configPanel = document.getElementById('config-panel');
   const configForm = document.getElementById('config-form');
+  const modelSelect = document.getElementById('model-name');
+  const estimationPanel = document.getElementById('estimation-panel');
+  const estimationForm = document.getElementById('estimation-form');
   const newDialogModal = document.getElementById('new-dialog-modal');
   const newDialogForm = document.getElementById('new-dialog-form');
   const cancelDialogBtn = document.getElementById('cancel-dialog-btn');
   const dialogInfo = document.getElementById('dialog-info');
   const toast = document.getElementById('toast');
+  const estimationScore = document.getElementById('estimation-score');
+  const estimationFeedback = document.getElementById('estimation-feedback');
 
   let conversationId = null;
   let isSending = false;
+  let isEstimating = false;
+  const DEFAULT_MODELS = [
+    { name: 'gemini-flash-latest', display_name: 'Gemini Flash' },
+    { name: 'gemini-pro', display_name: 'Gemini Pro' },
+  ];
+  let availableModels = [...DEFAULT_MODELS];
+
+  function typesetMath(target) {
+    const elements = Array.isArray(target) ? target : [target];
+    if (!window.MathJax?.typesetPromise) {
+      return;
+    }
+    window.MathJax.typesetPromise(elements).catch((err) => {
+      console.error('MathJax rendering error', err);
+    });
+  }
+
+  function populateModelOptions(preferredValue = '') {
+    if (!modelSelect) {
+      return;
+    }
+
+    const currentValue = preferredValue ?? modelSelect.value ?? '';
+    modelSelect.innerHTML = '';
+
+    const models = availableModels || [];
+
+    if (!models.length) {
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.disabled = true;
+      placeholder.textContent = 'Список моделей недоступен';
+      placeholder.selected = true;
+      modelSelect.appendChild(placeholder);
+    } else {
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.disabled = true;
+      placeholder.textContent = 'Выберите модель';
+      placeholder.selected = true;
+      modelSelect.appendChild(placeholder);
+
+      models.forEach((model) => {
+        if (!model?.name) {
+          return;
+        }
+        const option = document.createElement('option');
+        option.value = model.name;
+        option.textContent = model.display_name || model.name;
+        if (model.description) {
+          option.title = model.description;
+        }
+        modelSelect.appendChild(option);
+      });
+    }
+
+    if (currentValue) {
+      let option = Array.from(modelSelect.options).find((opt) => opt.value === currentValue);
+      if (!option) {
+        option = document.createElement('option');
+        option.value = currentValue;
+        option.textContent = `${currentValue} (custom)`;
+        modelSelect.appendChild(option);
+      }
+      modelSelect.value = currentValue;
+    }
+  }
+
+  async function fetchModels(preferredValue = '') {
+    if (!modelSelect) {
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/models');
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.error || 'Не удалось получить список моделей');
+      }
+      const data = await res.json();
+      if (Array.isArray(data.models)) {
+        availableModels = data.models.filter((model) => Boolean(model?.name));
+      } else {
+        availableModels = [...DEFAULT_MODELS];
+      }
+    } catch (err) {
+      console.error(err);
+      const message = err instanceof Error ? err.message : 'Не удалось получить список моделей';
+      showToast(message, true);
+      if (!availableModels.length) {
+        availableModels = [...DEFAULT_MODELS];
+      }
+    } finally {
+      populateModelOptions(preferredValue);
+    }
+  }
 
   function appendMessage(role, text) {
     const wrapper = document.createElement('div');
@@ -23,11 +125,7 @@ document.addEventListener('DOMContentLoaded', () => {
     chatWindow.appendChild(wrapper);
     chatWindow.scrollTop = chatWindow.scrollHeight;
 
-    if (window.MathJax?.typesetPromise) {
-      window.MathJax.typesetPromise([wrapper]).catch((err) => {
-        console.error('MathJax rendering error', err);
-      });
-    }
+    typesetMath(wrapper);
   }
 
   function resetChat() {
@@ -53,6 +151,25 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 3200);
   }
 
+  function resetEstimationResult() {
+    if (estimationScore) {
+      estimationScore.textContent = '—';
+    }
+    if (estimationFeedback) {
+      estimationFeedback.textContent = '—';
+    }
+  }
+
+  function updateEstimationResult(score, feedback) {
+    if (estimationScore) {
+      estimationScore.textContent = score ?? '—';
+    }
+    if (estimationFeedback) {
+      estimationFeedback.textContent = feedback ?? '—';
+      typesetMath(estimationFeedback);
+    }
+  }
+
   function toggleModal(show) {
     if (show) {
       newDialogModal.classList.remove('hidden');
@@ -67,11 +184,14 @@ document.addEventListener('DOMContentLoaded', () => {
       const res = await fetch('/api/config');
       if (!res.ok) throw new Error('Не удалось загрузить конфигурацию');
       const config = await res.json();
-      document.getElementById('model-name').value = config.model?.name ?? '';
+      const currentModel = config.model?.name ?? '';
+      populateModelOptions(currentModel);
       document.getElementById('prompt-template').value = config.prompt_template ?? '';
+      document.getElementById('estimation-template').value = config.estimation_template ?? '';
     } catch (err) {
       console.error(err);
-      showToast(err.message, true);
+      const message = err instanceof Error ? err.message : 'Не удалось загрузить конфигурацию';
+      showToast(message, true);
     }
   }
 
@@ -93,6 +213,46 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     dialogInfo.innerHTML = items.map(text => `<span>${text}</span>`).join('<br>');
     dialogInfo.classList.remove('hidden');
+  }
+
+  async function submitEstimation(event) {
+    event.preventDefault();
+    if (!estimationForm || isEstimating) {
+      return;
+    }
+
+    isEstimating = true;
+    const submitButton = estimationForm.querySelector('button[type="submit"]');
+    if (submitButton) {
+      submitButton.disabled = true;
+    }
+    resetEstimationResult();
+
+    try {
+      const formData = new FormData(estimationForm);
+      const res = await fetch('/api/estimation', {
+        method: 'POST',
+        body: formData,
+      });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        const message = error.error || 'Не удалось получить оценку';
+        throw new Error(message);
+      }
+      const data = await res.json();
+      updateEstimationResult(data.score, data.feedback);
+      showToast('Оценка получена');
+    } catch (err) {
+      console.error(err);
+      const message = err instanceof Error ? err.message : 'Не удалось получить оценку';
+      showToast(message, true);
+      updateEstimationResult(null, `[Ошибка] ${message}`);
+    } finally {
+      if (submitButton) {
+        submitButton.disabled = false;
+      }
+      isEstimating = false;
+    }
   }
 
   async function createDialog(formData) {
@@ -225,10 +385,38 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   toggleConfigBtn.addEventListener('click', () => {
-    configPanel.classList.toggle('hidden');
+    if (!configPanel) {
+      return;
+    }
+    const isHidden = configPanel.classList.toggle('hidden');
+    if (!isHidden && estimationPanel) {
+      estimationPanel.classList.add('hidden');
+    }
   });
+
+  if (toggleEstimationBtn) {
+    toggleEstimationBtn.addEventListener('click', () => {
+      if (!estimationPanel) {
+        return;
+      }
+      const willShow = estimationPanel.classList.contains('hidden');
+      estimationPanel.classList.toggle('hidden');
+      if (willShow && configPanel) {
+        configPanel.classList.add('hidden');
+      }
+    });
+  }
 
   configForm.addEventListener('submit', saveConfig);
 
-  fetchConfig();
+  if (estimationForm) {
+    estimationForm.addEventListener('submit', submitEstimation);
+  }
+
+  populateModelOptions();
+
+  (async () => {
+    await fetchModels();
+    await fetchConfig();
+  })();
 });

@@ -157,6 +157,25 @@ button.primary:not(:disabled):hover {
   gap: 12px;
 }
 
+.estimation-panel .estimation-result {
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: #f9f9fb;
+  font-size: 0.95rem;
+}
+
+.estimation-feedback {
+  margin-top: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 10px;
+  background: #fff;
+  min-height: 64px;
+  white-space: pre-wrap;
+}
+
 .config-panel label {
   display: flex;
   flex-direction: column;
@@ -165,7 +184,8 @@ button.primary:not(:disabled):hover {
 }
 
 .config-panel input,
-.config-panel textarea {
+.config-panel textarea,
+.config-panel select {
   padding: 8px;
   border: 1px solid var(--border-color);
   border-radius: 6px;
