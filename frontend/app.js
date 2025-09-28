@@ -22,6 +22,12 @@ document.addEventListener('DOMContentLoaded', () => {
     wrapper.textContent = text;
     chatWindow.appendChild(wrapper);
     chatWindow.scrollTop = chatWindow.scrollHeight;
+
+    if (window.MathJax?.typesetPromise) {
+      window.MathJax.typesetPromise([wrapper]).catch((err) => {
+        console.error('MathJax rendering error', err);
+      });
+    }
   }
 
   function resetChat() {
