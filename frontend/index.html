@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Tutor Chat</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <h1>Tutor Chat</h1>
+    <div class="header-actions">
+      <button id="start-dialog-btn" class="primary">Начать новый диалог</button>
+      <button id="toggle-config-btn">Настройки</button>
+    </div>
+  </header>
+
+  <main class="app-main">
+    <section class="chat-section">
+      <div id="dialog-info" class="dialog-info hidden"></div>
+      <div id="chat-window" class="chat-window"></div>
+      <div class="input-area">
+        <textarea id="message-input" placeholder="Введите сообщение" rows="2" disabled></textarea>
+        <button id="send-btn" class="primary" disabled>Отправить</button>
+      </div>
+    </section>
+
+    <aside id="config-panel" class="config-panel hidden">
+      <form id="config-form">
+        <h2>Настройки</h2>
+        <label>
+          Модель
+          <input type="text" name="model.name" id="model-name" required>
+        </label>
+        <p class="hint">API ключ берётся из переменной окружения GEMINI_API на сервере.</p>
+        <label>
+          Промпт (шаблон Jinja)
+          <textarea name="prompt_template" id="prompt-template" rows="12" required></textarea>
+        </label>
+        <div class="config-actions">
+          <button type="submit" class="primary">Сохранить</button>
+        </div>
+        <p class="hint">Переменные: {{task}}, {{task_image}}, {{solution_image}}, {{dialogue_turns}}</p>
+      </form>
+    </aside>
+  </main>
+
+  <div id="new-dialog-modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-content">
+      <h2>Новый диалог</h2>
+      <form id="new-dialog-form">
+        <label>
+          Описание задачи (опционально)
+          <textarea name="task" rows="4" placeholder="Текст задания"></textarea>
+        </label>
+        <label>
+          Изображение с заданием (опционально)
+          <input type="file" name="task_image" accept="image/*">
+        </label>
+        <label>
+          Изображение c решением ученика (опционально)
+          <input type="file" name="solution_image" accept="image/*">
+        </label>
+        <div class="modal-actions">
+          <button type="submit" class="primary">Создать диалог</button>
+          <button type="button" id="cancel-dialog-btn">Отмена</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="/static/app.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+__pycache__/
+*.py[cod]
+.DS_Store
+.env
+.env.*
+*.log
+*~
+
+# Runtime data
+config.json~
+data/conversations.log
+
+data/conversations/*
+!data/conversations/.gitkeep
+data/uploads/*
+!data/uploads/.gitkeep
+
+# Python virtual environments
+venv/
+.env/
+ENV/
+.envrc
