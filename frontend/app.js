@@ -10,6 +10,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const modelSelect = document.getElementById('model-name');
   const estimationPanel = document.getElementById('estimation-panel');
   const estimationForm = document.getElementById('estimation-form');
+  const panelResizer = document.getElementById('panel-resizer');
   const newDialogModal = document.getElementById('new-dialog-modal');
   const newDialogForm = document.getElementById('new-dialog-form');
   const cancelDialogBtn = document.getElementById('cancel-dialog-btn');
@@ -17,6 +18,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const toast = document.getElementById('toast');
   const estimationScore = document.getElementById('estimation-score');
   const estimationFeedback = document.getElementById('estimation-feedback');
+  const appMain = document.querySelector('.app-main');
 
   let conversationId = null;
   let isSending = false;
@@ -26,6 +28,13 @@ document.addEventListener('DOMContentLoaded', () => {
     { name: 'gemini-pro', display_name: 'Gemini Pro' },
   ];
   let availableModels = [...DEFAULT_MODELS];
+  let currentSidePanel = null;
+  let savedPanelWidth = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--panel-width'), 10) || 360;
+  let isResizingPanel = false;
+  let activePointerId = null;
+  const PANEL_MIN_WIDTH = 240;
+  const PANEL_MAX_WIDTH = 640;
+  const MIN_CHAT_WIDTH = 320;
 
   function typesetMath(target) {
     const elements = Array.isArray(target) ? target : [target];
@@ -35,6 +44,112 @@ document.addEventListener('DOMContentLoaded', () => {
     window.MathJax.typesetPromise(elements).catch((err) => {
       console.error('MathJax rendering error', err);
     });
+  }
+
+  function clampPanelWidth(width) {
+    if (!appMain) {
+      return width;
+    }
+    const rect = appMain.getBoundingClientRect();
+    const resizerWidth = panelResizer && !panelResizer.classList.contains('hidden')
+      ? panelResizer.offsetWidth || 6
+      : 6;
+    const maxAllowed = Math.max(PANEL_MIN_WIDTH, rect.width - MIN_CHAT_WIDTH - resizerWidth);
+    const maxWidth = Math.min(PANEL_MAX_WIDTH, maxAllowed);
+    if (maxWidth <= PANEL_MIN_WIDTH) {
+      return PANEL_MIN_WIDTH;
+    }
+    return Math.min(Math.max(width, PANEL_MIN_WIDTH), maxWidth);
+  }
+
+  function applyPanelWidth(panel, width) {
+    if (!panel) {
+      return;
+    }
+    const clamped = clampPanelWidth(width || savedPanelWidth);
+    panel.style.width = `${clamped}px`;
+    panel.style.flex = `0 0 ${clamped}px`;
+    savedPanelWidth = clamped;
+  }
+
+  function getPanelWidth(panel) {
+    if (!panel) {
+      return savedPanelWidth;
+    }
+    const rect = panel.getBoundingClientRect();
+    return rect.width || savedPanelWidth;
+  }
+
+  function ensureResizerPosition(panel) {
+    if (!panelResizer || !appMain || !panel) {
+      return;
+    }
+    if (panelResizer.nextElementSibling !== panel) {
+      appMain.insertBefore(panelResizer, panel);
+    }
+  }
+
+  function showResizer(panel) {
+    if (!panelResizer) {
+      return;
+    }
+    ensureResizerPosition(panel);
+    panelResizer.classList.remove('hidden');
+    panelResizer.setAttribute('aria-hidden', 'false');
+  }
+
+  function hideResizer() {
+    if (!panelResizer) {
+      return;
+    }
+    panelResizer.classList.add('hidden');
+    panelResizer.setAttribute('aria-hidden', 'true');
+  }
+
+  function showSidePanel(panel) {
+    if (!panel) {
+      return;
+    }
+
+    if (currentSidePanel && currentSidePanel !== panel) {
+      savedPanelWidth = getPanelWidth(currentSidePanel) || savedPanelWidth;
+      currentSidePanel.classList.add('hidden');
+    }
+
+    if (panel.classList.contains('hidden')) {
+      panel.classList.remove('hidden');
+    }
+
+    currentSidePanel = panel;
+    applyPanelWidth(panel, savedPanelWidth);
+    showResizer(panel);
+  }
+
+  function hideSidePanel(panel) {
+    if (!panel) {
+      return;
+    }
+
+    if (!panel.classList.contains('hidden')) {
+      savedPanelWidth = getPanelWidth(panel) || savedPanelWidth;
+      panel.classList.add('hidden');
+    }
+
+    if (currentSidePanel === panel) {
+      currentSidePanel = null;
+      hideResizer();
+    }
+  }
+
+  function togglePanel(panel) {
+    if (!panel) {
+      return;
+    }
+    if (currentSidePanel === panel && !panel.classList.contains('hidden')) {
+      hideSidePanel(panel);
+    } else {
+      showSidePanel(panel);
+    }
   }
 
   function populateModelOptions(preferredValue = '') {
@@ -255,6 +370,46 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  if (panelResizer) {
+    panelResizer.addEventListener('pointerdown', (event) => {
+      if (!currentSidePanel || !appMain) {
+        return;
+      }
+      event.preventDefault();
+      panelResizer.setPointerCapture(event.pointerId);
+      isResizingPanel = true;
+      activePointerId = event.pointerId;
+      document.body.classList.add('resizing-side-panel');
+    });
+
+    panelResizer.addEventListener('pointermove', (event) => {
+      if (!isResizingPanel || event.pointerId !== activePointerId || !currentSidePanel || !appMain) {
+        return;
+      }
+      const mainRect = appMain.getBoundingClientRect();
+      let newWidth = mainRect.right - event.clientX;
+      const resizerWidth = panelResizer.offsetWidth || 6;
+      newWidth -= resizerWidth / 2;
+      const clamped = clampPanelWidth(newWidth);
+      applyPanelWidth(currentSidePanel, clamped);
+    });
+
+    const finishResize = (event) => {
+      if (!isResizingPanel || event.pointerId !== activePointerId) {
+        return;
+      }
+      isResizingPanel = false;
+      activePointerId = null;
+      document.body.classList.remove('resizing-side-panel');
+      if (panelResizer.hasPointerCapture(event.pointerId)) {
+        panelResizer.releasePointerCapture(event.pointerId);
+      }
+    };
+
+    panelResizer.addEventListener('pointerup', finishResize);
+    panelResizer.addEventListener('pointercancel', finishResize);
+  }
+
   async function createDialog(formData) {
     try {
       const res = await fetch('/api/dialogs', {
@@ -385,25 +540,12 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   toggleConfigBtn.addEventListener('click', () => {
-    if (!configPanel) {
-      return;
-    }
-    const isHidden = configPanel.classList.toggle('hidden');
-    if (!isHidden && estimationPanel) {
-      estimationPanel.classList.add('hidden');
-    }
+    togglePanel(configPanel);
   });
 
   if (toggleEstimationBtn) {
     toggleEstimationBtn.addEventListener('click', () => {
-      if (!estimationPanel) {
-        return;
-      }
-      const willShow = estimationPanel.classList.contains('hidden');
-      estimationPanel.classList.toggle('hidden');
-      if (willShow && configPanel) {
-        configPanel.classList.add('hidden');
-      }
+      togglePanel(estimationPanel);
     });
   }
 

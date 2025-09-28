@@ -9,6 +9,7 @@ A simple tutor-style chat application that lets a student converse with a Gemini
 - Configuration panel to update the Gemini model name and tutor prompt; the Gemini API key is read from the `GEMINI_API` environment variable.
 - Separate panel to request automatic grading of a student's work using a configurable estimation template.
 - Automatically fetches the list of available Gemini models on startup and exposes them in the settings dropdown.
+- Resizable layout lets you shrink the chat area to expand the settings or estimation panel when it is open.
 
 ## Getting Started
 1. Create and activate a Python 3.10+ virtual environment.
