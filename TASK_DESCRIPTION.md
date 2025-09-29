@@ -112,3 +112,12 @@ Your task is to come up with the next message to a student.
 * allow the user to pick a conversation from a dropdown list
 * render a preview that shows the prompt and all turns as "Teacher" / "Student" lines
 * provide a "Download conversation" button that saves the rendered text as a plain-text file
+
+## Export all
+* new button "export all"
+* exports the whole conversations.log as xlsx file
+* create two sheets in the file for conversations and for estimations
+* conversations: conversation_created or message_appended
+* estimations: estimation_performed
+* for each sheet create one column for each field from conversation.log
+* after click on this button xlsx file downloads

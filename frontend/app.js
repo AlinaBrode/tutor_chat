@@ -16,6 +16,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const exportSelect = document.getElementById('export-conversation-select');
   const exportPreview = document.getElementById('export-preview');
   const downloadConversationBtn = document.getElementById('download-conversation-btn');
+  const downloadAllConversationsBtn = document.getElementById('download-all-conversations-btn');
   const newDialogModal = document.getElementById('new-dialog-modal');
   const newDialogForm = document.getElementById('new-dialog-form');
   const cancelDialogBtn = document.getElementById('cancel-dialog-btn');
@@ -332,6 +333,48 @@ document.addEventListener('DOMContentLoaded', () => {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+  }
+
+  function extractFileName(contentDisposition) {
+    if (!contentDisposition) {
+      return null;
+    }
+    const match = /filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i.exec(contentDisposition);
+    if (!match) {
+      return null;
+    }
+    return decodeURIComponent(match[1] || match[2] || '').trim() || null;
+  }
+
+  async function downloadAllConversations() {
+    if (!downloadAllConversationsBtn) {
+      return;
+    }
+    downloadAllConversationsBtn.disabled = true;
+    try {
+      const res = await fetch('/api/export/all');
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.error || 'Не удалось экспортировать диалоги');
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      const disposition = res.headers.get('Content-Disposition');
+      const filename = extractFileName(disposition) || 'conversation_export.xlsx';
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error(err);
+      const message = err instanceof Error ? err.message : 'Не удалось экспортировать диалоги';
+      showToast(message, true);
+    } finally {
+      downloadAllConversationsBtn.disabled = false;
+    }
   }
 
   function populateModelOptions(preferredValue = '') {
@@ -760,6 +803,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (downloadConversationBtn) {
     downloadConversationBtn.addEventListener('click', downloadConversation);
+  }
+
+  if (downloadAllConversationsBtn) {
+    downloadAllConversationsBtn.addEventListener('click', downloadAllConversations);
   }
 
   populateModelOptions();

@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, send_file, send_from_directory
 from jinja2 import Template
 
 from .config_manager import load_config, update_config
@@ -121,6 +121,19 @@ def export_conversation(conversation_id: str):
     return jsonify({
         "conversation": conversation,
     })
+
+
+@app.get("/api/export/all")
+def export_all_conversations():
+    buffer = storage.export_log_to_workbook()
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    filename = f"conversation_export_{timestamp}.xlsx"
+    return send_file(
+        buffer,
+        as_attachment=True,
+        download_name=filename,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
 
 @app.put("/api/config")

@@ -10,7 +10,7 @@ A simple tutor-style chat application that lets a student converse with a Gemini
 - Separate panel to request automatic grading of a student's work using a configurable estimation template.
 - Automatically fetches the list of available Gemini models on startup and exposes them in the settings dropdown.
 - Resizable layout lets you shrink the chat area to expand the settings or estimation panel when it is open.
-- Conversation export panel lets you browse saved dialogs, preview them, and download the full transcript as plain text.
+- Conversation export panel lets you browse saved dialogs, preview them, and download either a single transcript (plain text) or the entire history as an XLSX workbook.
 
 ## Getting Started
 1. Create and activate a Python 3.10+ virtual environment.

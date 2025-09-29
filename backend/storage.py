@@ -1,9 +1,13 @@
 import json
 import uuid
 from datetime import datetime
+from io import BytesIO
 from pathlib import Path
 from threading import Lock
 from typing import Dict, List
+
+from openpyxl import Workbook
+
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -120,6 +124,94 @@ def list_conversations_metadata() -> List[Dict]:
         })
     conversations.sort(key=lambda item: item.get("created_at") or "", reverse=True)
     return conversations
+
+
+def _load_log_entries() -> List[Dict]:
+    entries: List[Dict] = []
+    if not LOG_PATH.exists():
+        return entries
+    with LOG_PATH.open("r", encoding="utf-8") as fp:
+        for line in fp:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entries.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return entries
+
+
+def _ordered_headers(entries: List[Dict]) -> List[str]:
+    base_order = [
+        "event",
+        "timestamp",
+        "conversation_id",
+        "estimation_id",
+        "role",
+        "content",
+        "prompt_template",
+        "prompt",
+        "task",
+        "task_image",
+        "task_image_original_name",
+        "solution_image",
+        "solution_image_original_name",
+        "student_work",
+        "student_work_image",
+        "student_work_image_original_name",
+        "response",
+        "score",
+    ]
+    headers: List[str] = []
+    for key in base_order:
+        if any(key in entry for entry in entries):
+            headers.append(key)
+
+    additional_keys = sorted({
+        key for entry in entries for key in entry.keys()
+        if key not in headers
+    })
+    headers.extend(additional_keys)
+    return headers
+
+
+def _write_sheet(workbook: Workbook, title: str, entries: List[Dict]) -> None:
+    sheet = workbook.create_sheet(title)
+    if not entries:
+        sheet.append(["No data"])
+        return
+
+    headers = _ordered_headers(entries)
+    sheet.append(headers)
+    for entry in entries:
+        row = [entry.get(header, "") for header in headers]
+        sheet.append(row)
+
+
+def export_log_to_workbook() -> BytesIO:
+    workbook = Workbook()
+    # Remove the automatically created default sheet to control order
+    default_sheet = workbook.active
+    workbook.remove(default_sheet)
+
+    entries = _load_log_entries()
+    conversations = [
+        entry for entry in entries
+        if entry.get("event") in {"conversation_created", "message_appended"}
+    ]
+    estimations = [
+        entry for entry in entries
+        if entry.get("event") == "estimation_performed"
+    ]
+
+    _write_sheet(workbook, "conversations", conversations)
+    _write_sheet(workbook, "estimations", estimations)
+
+    buffer = BytesIO()
+    workbook.save(buffer)
+    buffer.seek(0)
+    return buffer
 
 
 def _append_log_entry(entry: Dict) -> None:
