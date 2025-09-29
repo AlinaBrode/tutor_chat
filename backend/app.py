@@ -6,16 +6,26 @@ import uuid
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Iterable, List, Optional, Tuple
 
 from flask import Flask, jsonify, request, send_file, send_from_directory
 from jinja2 import Template
+from markdown import Markdown
+from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
-from reportlab.lib.utils import simpleSplit
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.pdfgen import canvas
+from reportlab.platypus import (
+    ListFlowable,
+    ListItem,
+    Paragraph,
+    Preformatted,
+    SimpleDocTemplate,
+    Spacer,
+)
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+import xml.etree.ElementTree as ET
 
 from .config_manager import load_config, update_config
 from .llm_client import LLMConfig, TutorLLMClient, list_available_models
@@ -36,52 +46,284 @@ app = Flask(
 
 _AVAILABLE_MODELS: List[dict] = []
 PDF_FONT_NAME = "ExportSans"
-PDF_FONT_PATHS = (
-    "/usr/share/fonts/liberation-fonts/LiberationSans-Regular.ttf",
-    "/usr/share/fonts/liberation-fonts/LiberationSerif-Regular.ttf",
-    "/usr/share/fonts/liberation-fonts/LiberationSansNarrow-Regular.ttf",
+PDF_FONT_VARIANTS = (
+    ("ExportSans", "LiberationSans-Regular.ttf"),
+    ("ExportSans-Bold", "LiberationSans-Bold.ttf"),
+    ("ExportSans-Italic", "LiberationSans-Italic.ttf"),
+    ("ExportSans-BoldItalic", "LiberationSans-BoldItalic.ttf"),
 )
+PDF_FONT_SEARCH_DIRS = (
+    Path("/usr/share/fonts/liberation-fonts"),
+    Path("/usr/share/fonts/truetype/liberation"),
+    Path("/usr/share/fonts"),
+)
+MD_EXTENSIONS = [
+    "fenced_code",
+    "sane_lists",
+    "tables",
+]
 
 
 def _ensure_pdf_font() -> str:
-    if PDF_FONT_NAME in pdfmetrics.getRegisteredFontNames():
+    registered = set(pdfmetrics.getRegisteredFontNames())
+    if PDF_FONT_NAME in registered:
         return PDF_FONT_NAME
 
-    for candidate in PDF_FONT_PATHS:
-        path = Path(candidate)
-        if path.exists():
-            pdfmetrics.registerFont(TTFont(PDF_FONT_NAME, str(path)))
-            return PDF_FONT_NAME
+    for font_name, filename in PDF_FONT_VARIANTS:
+        if font_name in registered:
+            continue
+        for directory in PDF_FONT_SEARCH_DIRS:
+            candidate = directory / filename
+            if candidate.exists():
+                try:
+                    pdfmetrics.registerFont(TTFont(font_name, str(candidate)))
+                    registered.add(font_name)
+                    break
+                except Exception as exc:  # pragma: no cover
+                    LOGGER.warning("Failed to register font %s: %s", candidate, exc)
+
+    if PDF_FONT_NAME in pdfmetrics.getRegisteredFontNames():
+        return PDF_FONT_NAME
 
     LOGGER.warning("No Liberation font found; falling back to Helvetica (may lack Cyrillic support)")
     return "Helvetica"
 
 
-MD_HEADING_PATTERN = re.compile(r"^\s{0,3}#{1,6}\s+", re.MULTILINE)
-MD_BULLET_PATTERN = re.compile(r"^(\s*)([-*+]\s+)", re.MULTILINE)
-MD_ORDERED_PATTERN = re.compile(r"^(\s*)\d+\.\s+", re.MULTILINE)
+def _escape_xml(text: str) -> str:
+    return (
+        text.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
 
 
-def _markdown_to_plain(text: str) -> str:
-    cleaned = text.replace("\r\n", "\n")
+def _build_pdf_styles(font_name: str) -> dict[str, ParagraphStyle]:
+    base_styles = getSampleStyleSheet()
+    body = ParagraphStyle(
+        "Body",
+        parent=base_styles["BodyText"],
+        fontName=font_name,
+        fontSize=11,
+        leading=14,
+        spaceAfter=6,
+    )
+    heading1 = ParagraphStyle(
+        "Heading1",
+        parent=base_styles["Heading1"],
+        fontName=font_name,
+        fontSize=18,
+        leading=22,
+        spaceAfter=12,
+    )
+    heading2 = ParagraphStyle(
+        "Heading2",
+        parent=base_styles["Heading2"],
+        fontName=font_name,
+        fontSize=14,
+        leading=18,
+        spaceAfter=8,
+    )
+    heading3 = ParagraphStyle(
+        "Heading3",
+        parent=base_styles["Heading3"],
+        fontName=font_name,
+        fontSize=12,
+        leading=16,
+        spaceAfter=6,
+    )
+    meta = ParagraphStyle(
+        "Meta",
+        parent=body,
+        textColor=colors.grey,
+        spaceAfter=4,
+    )
+    list_body = ParagraphStyle(
+        "ListBody",
+        parent=body,
+        leftIndent=0,
+        firstLineIndent=0,
+        spaceAfter=2,
+    )
+    blockquote = ParagraphStyle(
+        "BlockQuote",
+        parent=body,
+        leftIndent=12,
+        textColor=colors.darkgray,
+        spaceBefore=4,
+        spaceAfter=6,
+    )
+    code = ParagraphStyle(
+        "Code",
+        parent=body,
+        fontName="Courier",
+        fontSize=10,
+        leading=12,
+        backColor=colors.whitesmoke,
+        leftIndent=6,
+        rightIndent=6,
+        spaceBefore=4,
+        spaceAfter=8,
+    )
+    return {
+        "Body": body,
+        "Heading1": heading1,
+        "Heading2": heading2,
+        "Heading3": heading3,
+        "Meta": meta,
+        "ListBody": list_body,
+        "BlockQuote": blockquote,
+        "Code": code,
+    }
 
-    def _strip_code_block(match: re.Match[str]) -> str:
-        code = match.group(1).strip("\n")
-        return f"\n{code}\n"
 
-    cleaned = re.sub(r"```(.*?)```", _strip_code_block, cleaned, flags=re.DOTALL)
-    cleaned = re.sub(r"`([^`]+)`", r"\1", cleaned)
-    cleaned = re.sub(r"\*\*(.*?)\*\*", r"\1", cleaned)
-    cleaned = re.sub(r"\*(.*?)\*", r"\1", cleaned)
-    cleaned = re.sub(r"__(.*?)__", r"\1", cleaned)
-    cleaned = re.sub(r"_(.*?)_", r"\1", cleaned)
+def _inline_markup(node: ET.Element) -> str:
+    parts: List[str] = []
+    if node.text:
+        parts.append(_escape_xml(node.text))
+    for child in node:
+        parts.append(_wrap_inline(child))
+        if child.tail:
+            parts.append(_escape_xml(child.tail))
+    return "".join(parts)
 
-    cleaned = MD_HEADING_PATTERN.sub("", cleaned)
-    cleaned = MD_BULLET_PATTERN.sub(lambda m: f"{m.group(1)}• ", cleaned)
-    cleaned = MD_ORDERED_PATTERN.sub(lambda m: f"{m.group(1)}• ", cleaned)
-    cleaned = cleaned.replace("> ", "")
-    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
-    return cleaned.strip()
+
+def _wrap_inline(node: ET.Element) -> str:
+    tag = node.tag.lower()
+    if tag in {"strong", "b"}:
+        return f"<b>{_inline_markup(node)}</b>"
+    if tag in {"em", "i"}:
+        return f"<i>{_inline_markup(node)}</i>"
+    if tag == "code":
+        code_text = "".join(node.itertext())
+        return f"<font name='Courier'>{_escape_xml(code_text)}</font>"
+    if tag == "br":
+        return "<br/>"
+    if tag == "a":
+        inner = _inline_markup(node)
+        href = node.attrib.get("href")
+        if href:
+            return f"{inner} ({_escape_xml(href)})"
+        return inner
+    if tag == "sub":
+        return f"<sub>{_inline_markup(node)}</sub>"
+    if tag == "sup":
+        return f"<sup>{_inline_markup(node)}</sup>"
+    return _inline_markup(node)
+
+
+def _list_items_from_elements(elements: Iterable[ET.Element], styles: dict) -> List[ListItem]:
+    items: List[ListItem] = []
+    for li in elements:
+        text = _inline_markup(li).strip()
+        if not text:
+            continue
+        items.append(ListItem(Paragraph(text, styles["ListBody"])))
+    return items
+
+
+def _element_to_flowables(element: ET.Element, styles: dict, font_name: str) -> List:
+    tag = element.tag.lower()
+    flowables: List = []
+
+    if tag in {"p", "span", "div"}:
+        raw_text = "".join(element.itertext()).strip()
+        markup = _inline_markup(element).strip()
+        if not markup:
+            return [Spacer(1, 6)]
+        if raw_text.startswith("$$") and raw_text.endswith("$$") and raw_text.count("$$") >= 2:
+            flowables.append(Preformatted(raw_text, styles["Code"]))
+        else:
+            flowables.append(Paragraph(markup, styles["Body"]))
+        return flowables
+
+    if tag in {"h1", "h2", "h3"}:
+        heading_style = {
+            "h1": styles["Heading1"],
+            "h2": styles["Heading2"],
+            "h3": styles.get("Heading3", styles["Heading2"]),
+        }[tag]
+        flowables.append(Paragraph(_inline_markup(element), heading_style))
+        return flowables
+
+    if tag in {"ul", "ol"}:
+        items = _list_items_from_elements(element.findall("li"), styles)
+        if not items:
+            return []
+        bullet_type = "bullet" if tag == "ul" else "1"
+        start = element.attrib.get("start") or "1"
+        try:
+            start_value: Optional[int] = int(start) if tag == "ol" else None
+        except ValueError:
+            start_value = 1
+        flowables.append(
+            ListFlowable(
+                items,
+                bulletType=bullet_type,
+                bulletFontName=font_name,
+                bulletFontSize=11,
+                bulletChar="•" if tag == "ul" else None,
+                leftIndent=12,
+                start=start_value,
+            )
+        )
+        flowables.append(Spacer(1, 6))
+        return flowables
+
+    if tag == "pre":
+        code_text = "\n".join(line.rstrip() for line in element.itertext()).strip("\n")
+        flowables.append(Preformatted(code_text or " ", styles["Code"]))
+        return flowables
+
+    if tag == "code":
+        code_text = "".join(element.itertext())
+        flowables.append(Preformatted(code_text, styles["Code"]))
+        return flowables
+
+    if tag == "blockquote":
+        markup = _inline_markup(element).strip()
+        if markup:
+            flowables.append(Paragraph(markup, styles["BlockQuote"]))
+            flowables.append(Spacer(1, 4))
+        return flowables
+
+    if tag == "table":
+        rows: List[str] = []
+        for tr in element.findall("tr"):
+            cells = [" ".join(td.itertext()).strip() for td in tr]
+            rows.append(" | ".join(cell for cell in cells if cell))
+        for row in rows:
+            if row:
+                flowables.append(Paragraph(_escape_xml(row), styles["Body"]))
+        if rows:
+            flowables.append(Spacer(1, 6))
+        return flowables
+
+    # Fallback: treat unknown element as paragraph
+    markup = _inline_markup(element).strip()
+    if markup:
+        flowables.append(Paragraph(markup, styles["Body"]))
+    else:
+        flowables.append(Spacer(1, 4))
+    return flowables
+
+
+def _markdown_to_flowables(feedback: str, styles: dict, font_name: str) -> List:
+    md = Markdown(extensions=MD_EXTENSIONS, output_format="xhtml1")
+    html = md.convert(feedback or "")
+    md.reset()
+
+    if not html.strip():
+        return []
+
+    try:
+        root = ET.fromstring(f"<root>{html}</root>")
+    except ET.ParseError:
+        return [Paragraph(_escape_xml(feedback), styles["Body"])]
+
+    flowables: List = []
+    for child in root:
+        flowables.extend(_element_to_flowables(child, styles, font_name))
+    return flowables
 
 
 def _refresh_models() -> None:
@@ -192,53 +434,37 @@ def export_all_conversations():
 
 def _create_estimation_pdf(score: Optional[str], feedback: str) -> BytesIO:
     font_name = _ensure_pdf_font()
-    plain_feedback = _markdown_to_plain(feedback)
+    styles = _build_pdf_styles(font_name)
     buffer = BytesIO()
-    pdf = canvas.Canvas(buffer, pagesize=A4)
-    width, height = A4
-    margin = 20 * mm
-    y = height - margin
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=20 * mm,
+        rightMargin=20 * mm,
+        topMargin=25 * mm,
+        bottomMargin=25 * mm,
+    )
 
-    pdf.setTitle("Estimation Result")
-    pdf.setAuthor("Tutor Chat")
+    story: List = []
+    story.append(Paragraph("Результат оценки", styles["Heading1"]))
+    story.append(Spacer(1, 10))
 
-    pdf.setFont(font_name, 16)
-    pdf.drawString(margin, y, "Результат оценки")
-    y -= 14 * mm
-
-    pdf.setFont(font_name, 12)
     timestamp = datetime.utcnow().strftime("%d.%m.%Y %H:%M:%S")
-    pdf.drawString(margin, y, f"Дата: {timestamp}")
-    y -= 7 * mm
-
+    story.append(Paragraph(f"Дата: {timestamp}", styles["Meta"]))
     if score:
-        pdf.drawString(margin, y, f"Оценка: {score}")
-        y -= 10 * mm
+        story.append(Paragraph(f"Оценка: <b>{_escape_xml(score)}</b>", styles["Meta"]))
+    story.append(Spacer(1, 12))
 
-    pdf.drawString(margin, y, "Обратная связь:")
-    y -= 8 * mm
+    story.append(Paragraph("Обратная связь:", styles["Heading2"]))
+    story.append(Spacer(1, 6))
 
-    pdf.setFont(font_name, 11)
-    available_width = width - 2 * margin
-    lines = []
-    for block in plain_feedback.splitlines() or [""]:
-        wrapped = simpleSplit(block or " ", font_name, 11, available_width)
-        lines.extend(wrapped or [" "])
-        lines.append("")  # blank line between paragraphs
-    if lines and lines[-1] == "":
-        lines.pop()
+    flowables = _markdown_to_flowables(feedback or "", styles, font_name)
+    if flowables:
+        story.extend(flowables)
+    else:
+        story.append(Paragraph("Нет обратной связи.", styles["Body"]))
 
-    line_height = 6 * mm
-    for line in lines:
-        if y <= margin:
-            pdf.showPage()
-            font_name = _ensure_pdf_font()
-            pdf.setFont(font_name, 11)
-            y = height - margin
-        pdf.drawString(margin, y, line)
-        y -= line_height
-
-    pdf.save()
+    doc.build(story)
     buffer.seek(0)
     return buffer
 
