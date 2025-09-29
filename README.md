@@ -7,7 +7,7 @@ A simple tutor-style chat application that lets a student converse with a Gemini
 - Turn-by-turn logging of conversations (JSON per dialog + JSONL log).
 - Optional upload of task and solution images at dialog start.
 - Configuration panel to update the Gemini model name and tutor prompt; the Gemini API key is read from the `GEMINI_API` environment variable.
-- Separate panel to request automatic grading of a student's work using a configurable estimation template.
+- Separate panel to request automatic grading of a student's work using a configurable estimation template, with one-click PDF export of the feedback.
 - Automatically fetches the list of available Gemini models on startup and exposes them in the settings dropdown.
 - Resizable layout lets you shrink the chat area to expand the settings or estimation panel when it is open.
 - Conversation export panel lets you browse saved dialogs, preview them, and download either a single transcript (plain text) or the entire history as an XLSX workbook.
@@ -36,6 +36,7 @@ Configuration is stored in `config.json`. The application exposes `/api/config` 
 ## Student Work Estimation
 - Open the "Оценить работу" panel and optionally provide task text/images and the student's work.
 - Press "Оценить" to send the filled template to the LLM; results show the extracted score (`1-5`) and full feedback.
+- Use "Экспорт результата" to download the feedback section as a PDF document.
 - Uploaded images are stored alongside other runtime uploads, and each estimation is logged in `data/conversations.log` with the rendered prompt and response.
 
 ## Conversation Export

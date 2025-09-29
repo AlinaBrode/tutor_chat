@@ -4,11 +4,18 @@ import logging
 import re
 import uuid
 from datetime import datetime
+from io import BytesIO
 from pathlib import Path
 from typing import List, Optional, Tuple
 
 from flask import Flask, jsonify, request, send_file, send_from_directory
 from jinja2 import Template
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import mm
+from reportlab.lib.utils import simpleSplit
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.pdfgen import canvas
 
 from .config_manager import load_config, update_config
 from .llm_client import LLMConfig, TutorLLMClient, list_available_models
@@ -28,6 +35,26 @@ app = Flask(
 )
 
 _AVAILABLE_MODELS: List[dict] = []
+PDF_FONT_NAME = "ExportSans"
+PDF_FONT_PATHS = (
+    "/usr/share/fonts/liberation-fonts/LiberationSans-Regular.ttf",
+    "/usr/share/fonts/liberation-fonts/LiberationSerif-Regular.ttf",
+    "/usr/share/fonts/liberation-fonts/LiberationSansNarrow-Regular.ttf",
+)
+
+
+def _ensure_pdf_font() -> str:
+    if PDF_FONT_NAME in pdfmetrics.getRegisteredFontNames():
+        return PDF_FONT_NAME
+
+    for candidate in PDF_FONT_PATHS:
+        path = Path(candidate)
+        if path.exists():
+            pdfmetrics.registerFont(TTFont(PDF_FONT_NAME, str(path)))
+            return PDF_FONT_NAME
+
+    LOGGER.warning("No Liberation font found; falling back to Helvetica (may lack Cyrillic support)")
+    return "Helvetica"
 
 
 def _refresh_models() -> None:
@@ -133,6 +160,78 @@ def export_all_conversations():
         as_attachment=True,
         download_name=filename,
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+def _create_estimation_pdf(score: Optional[str], feedback: str) -> BytesIO:
+    font_name = _ensure_pdf_font()
+    buffer = BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
+    margin = 20 * mm
+    y = height - margin
+
+    pdf.setTitle("Estimation Result")
+    pdf.setAuthor("Tutor Chat")
+
+    pdf.setFont(font_name, 16)
+    pdf.drawString(margin, y, "Результат оценки")
+    y -= 14 * mm
+
+    pdf.setFont(font_name, 12)
+    timestamp = datetime.utcnow().strftime("%d.%m.%Y %H:%M:%S")
+    pdf.drawString(margin, y, f"Дата: {timestamp}")
+    y -= 7 * mm
+
+    if score:
+        pdf.drawString(margin, y, f"Оценка: {score}")
+        y -= 10 * mm
+
+    pdf.drawString(margin, y, "Обратная связь:")
+    y -= 8 * mm
+
+    pdf.setFont(font_name, 11)
+    available_width = width - 2 * margin
+    lines = []
+    for block in feedback.splitlines() or [""]:
+        wrapped = simpleSplit(block or " ", font_name, 11, available_width)
+        lines.extend(wrapped or [" "])
+        lines.append("")  # blank line between paragraphs
+    if lines and lines[-1] == "":
+        lines.pop()
+
+    line_height = 6 * mm
+    for line in lines:
+        if y <= margin:
+            pdf.showPage()
+            font_name = _ensure_pdf_font()
+            pdf.setFont(font_name, 11)
+            y = height - margin
+        pdf.drawString(margin, y, line)
+        y -= line_height
+
+    pdf.save()
+    buffer.seek(0)
+    return buffer
+
+
+@app.post("/api/estimation/export")
+def export_estimation_result():
+    payload = request.get_json(force=True) or {}
+    feedback = (payload.get("feedback") or "").strip()
+    if not feedback:
+        return jsonify({"error": "Feedback is empty"}), 400
+
+    score = payload.get("score")
+    score_text = str(score).strip() if score is not None else ""
+    buffer = _create_estimation_pdf(score_text, feedback)
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    filename = f"estimation_{timestamp}.pdf"
+    return send_file(
+        buffer,
+        as_attachment=True,
+        download_name=filename,
+        mimetype="application/pdf",
     )
 
 

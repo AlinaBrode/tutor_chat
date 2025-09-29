@@ -99,6 +99,7 @@ Your task is to come up with the next message to a student.
   * parse model's reaction, extract next word after "score", place it into "score" field
   * the whole model's response put into "estimation" field of the form
   * make log entry for work estimation on the same level as dialog 
+* button "export result" saves the feedback text as a PDF file and downloads it
 
 
 # Conversation export

@@ -17,6 +17,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const exportPreview = document.getElementById('export-preview');
   const downloadConversationBtn = document.getElementById('download-conversation-btn');
   const downloadAllConversationsBtn = document.getElementById('download-all-conversations-btn');
+  const exportEstimationBtn = document.getElementById('export-estimation-btn');
   const newDialogModal = document.getElementById('new-dialog-modal');
   const newDialogForm = document.getElementById('new-dialog-form');
   const cancelDialogBtn = document.getElementById('cancel-dialog-btn');
@@ -46,6 +47,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let exportConversations = [];
   let exportCurrentConversationId = null;
   let exportPreviewText = '';
+  let lastEstimationResult = null;
 
   function typesetMath(target) {
     const elements = Array.isArray(target) ? target : [target];
@@ -377,6 +379,50 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  async function exportEstimationResult() {
+    if (!lastEstimationResult || !lastEstimationResult.feedback) {
+      showToast('Нет данных для экспорта. Сначала выполните оценку.', true);
+      return;
+    }
+    if (!exportEstimationBtn) {
+      return;
+    }
+
+    exportEstimationBtn.disabled = true;
+    try {
+      const res = await fetch('/api/estimation/export', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(lastEstimationResult)
+      });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.error || 'Не удалось экспортировать результат');
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      const disposition = res.headers.get('Content-Disposition');
+      const filename = extractFileName(disposition) || 'estimation_result.pdf';
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error(err);
+      const message = err instanceof Error ? err.message : 'Не удалось экспортировать результат';
+      showToast(message, true);
+    } finally {
+      if (exportEstimationBtn) {
+        exportEstimationBtn.disabled = !lastEstimationResult;
+      }
+    }
+  }
+
   function populateModelOptions(preferredValue = '') {
     if (!modelSelect) {
       return;
@@ -498,6 +544,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (estimationFeedback) {
       estimationFeedback.textContent = '—';
     }
+    lastEstimationResult = null;
+    if (exportEstimationBtn) {
+      exportEstimationBtn.disabled = true;
+    }
   }
 
   function updateEstimationResult(score, feedback) {
@@ -507,6 +557,26 @@ document.addEventListener('DOMContentLoaded', () => {
     if (estimationFeedback) {
       estimationFeedback.textContent = feedback ?? '—';
       typesetMath(estimationFeedback);
+    }
+
+    const normalizedScore = typeof score === 'number' ? String(score) : (score || '').toString().trim();
+    const sanitizedFeedback = (feedback || '').toString().trim();
+    const hasValidScore = Boolean(normalizedScore);
+    const isErrorFeedback = sanitizedFeedback.startsWith('[Ошибка');
+
+    if (hasValidScore && sanitizedFeedback && !isErrorFeedback) {
+      lastEstimationResult = {
+        score: normalizedScore,
+        feedback: sanitizedFeedback,
+      };
+      if (exportEstimationBtn) {
+        exportEstimationBtn.disabled = false;
+      }
+    } else {
+      lastEstimationResult = null;
+      if (exportEstimationBtn) {
+        exportEstimationBtn.disabled = true;
+      }
     }
   }
 
@@ -807,6 +877,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (downloadAllConversationsBtn) {
     downloadAllConversationsBtn.addEventListener('click', downloadAllConversations);
+  }
+
+  if (exportEstimationBtn) {
+    exportEstimationBtn.addEventListener('click', exportEstimationResult);
   }
 
   populateModelOptions();
