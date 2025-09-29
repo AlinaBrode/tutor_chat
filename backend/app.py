@@ -6,27 +6,10 @@ import uuid
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
-from typing import Iterable, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 from flask import Flask, jsonify, request, send_file, send_from_directory
 from jinja2 import Template
-from markdown import Markdown
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.units import mm
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import (
-    ListFlowable,
-    ListItem,
-    Paragraph,
-    Preformatted,
-    SimpleDocTemplate,
-    Spacer,
-)
-from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-import xml.etree.ElementTree as ET
-
 from .config_manager import load_config, update_config
 from .llm_client import LLMConfig, TutorLLMClient, list_available_models
 from . import storage
@@ -45,285 +28,56 @@ app = Flask(
 )
 
 _AVAILABLE_MODELS: List[dict] = []
-PDF_FONT_NAME = "ExportSans"
-PDF_FONT_VARIANTS = (
-    ("ExportSans", "LiberationSans-Regular.ttf"),
-    ("ExportSans-Bold", "LiberationSans-Bold.ttf"),
-    ("ExportSans-Italic", "LiberationSans-Italic.ttf"),
-    ("ExportSans-BoldItalic", "LiberationSans-BoldItalic.ttf"),
-)
-PDF_FONT_SEARCH_DIRS = (
-    Path("/usr/share/fonts/liberation-fonts"),
-    Path("/usr/share/fonts/truetype/liberation"),
-    Path("/usr/share/fonts"),
-)
-MD_EXTENSIONS = [
-    "fenced_code",
-    "sane_lists",
-    "tables",
-]
+PANDOC_BINARY = os.getenv("PANDOC_PATH", "pandoc")
+PANDOC_TEX_ENGINE = os.getenv("PANDOC_TEX_ENGINE", "xelatex")
 
 
-def _ensure_pdf_font() -> str:
-    registered = set(pdfmetrics.getRegisteredFontNames())
-    if PDF_FONT_NAME in registered:
-        return PDF_FONT_NAME
+def _render_markdown_to_pdf(markdown_text: str) -> BytesIO:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        md_path = Path(tmpdir) / "feedback.md"
+        pdf_path = md_path.with_suffix(".pdf")
+        md_path.write_text(markdown_text, encoding="utf-8")
 
-    for font_name, filename in PDF_FONT_VARIANTS:
-        if font_name in registered:
-            continue
-        for directory in PDF_FONT_SEARCH_DIRS:
-            candidate = directory / filename
-            if candidate.exists():
-                try:
-                    pdfmetrics.registerFont(TTFont(font_name, str(candidate)))
-                    registered.add(font_name)
-                    break
-                except Exception as exc:  # pragma: no cover
-                    LOGGER.warning("Failed to register font %s: %s", candidate, exc)
+        command = [
+            PANDOC_BINARY,
+            str(md_path),
+            "-o",
+            str(pdf_path),
+            "--from",
+            "markdown+tex_math_dollars+tex_math_single_backslash",
+            "--pdf-engine",
+            PANDOC_TEX_ENGINE,
+        ]
 
-    if PDF_FONT_NAME in pdfmetrics.getRegisteredFontNames():
-        return PDF_FONT_NAME
-
-    LOGGER.warning("No Liberation font found; falling back to Helvetica (may lack Cyrillic support)")
-    return "Helvetica"
-
-
-def _escape_xml(text: str) -> str:
-    return (
-        text.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-    )
-
-
-def _build_pdf_styles(font_name: str) -> dict[str, ParagraphStyle]:
-    base_styles = getSampleStyleSheet()
-    body = ParagraphStyle(
-        "Body",
-        parent=base_styles["BodyText"],
-        fontName=font_name,
-        fontSize=11,
-        leading=14,
-        spaceAfter=6,
-    )
-    heading1 = ParagraphStyle(
-        "Heading1",
-        parent=base_styles["Heading1"],
-        fontName=font_name,
-        fontSize=18,
-        leading=22,
-        spaceAfter=12,
-    )
-    heading2 = ParagraphStyle(
-        "Heading2",
-        parent=base_styles["Heading2"],
-        fontName=font_name,
-        fontSize=14,
-        leading=18,
-        spaceAfter=8,
-    )
-    heading3 = ParagraphStyle(
-        "Heading3",
-        parent=base_styles["Heading3"],
-        fontName=font_name,
-        fontSize=12,
-        leading=16,
-        spaceAfter=6,
-    )
-    meta = ParagraphStyle(
-        "Meta",
-        parent=body,
-        textColor=colors.grey,
-        spaceAfter=4,
-    )
-    list_body = ParagraphStyle(
-        "ListBody",
-        parent=body,
-        leftIndent=0,
-        firstLineIndent=0,
-        spaceAfter=2,
-    )
-    blockquote = ParagraphStyle(
-        "BlockQuote",
-        parent=body,
-        leftIndent=12,
-        textColor=colors.darkgray,
-        spaceBefore=4,
-        spaceAfter=6,
-    )
-    code = ParagraphStyle(
-        "Code",
-        parent=body,
-        fontName="Courier",
-        fontSize=10,
-        leading=12,
-        backColor=colors.whitesmoke,
-        leftIndent=6,
-        rightIndent=6,
-        spaceBefore=4,
-        spaceAfter=8,
-    )
-    return {
-        "Body": body,
-        "Heading1": heading1,
-        "Heading2": heading2,
-        "Heading3": heading3,
-        "Meta": meta,
-        "ListBody": list_body,
-        "BlockQuote": blockquote,
-        "Code": code,
-    }
-
-
-def _inline_markup(node: ET.Element) -> str:
-    parts: List[str] = []
-    if node.text:
-        parts.append(_escape_xml(node.text))
-    for child in node:
-        parts.append(_wrap_inline(child))
-        if child.tail:
-            parts.append(_escape_xml(child.tail))
-    return "".join(parts)
-
-
-def _wrap_inline(node: ET.Element) -> str:
-    tag = node.tag.lower()
-    if tag in {"strong", "b"}:
-        return f"<b>{_inline_markup(node)}</b>"
-    if tag in {"em", "i"}:
-        return f"<i>{_inline_markup(node)}</i>"
-    if tag == "code":
-        code_text = "".join(node.itertext())
-        return f"<font name='Courier'>{_escape_xml(code_text)}</font>"
-    if tag == "br":
-        return "<br/>"
-    if tag == "a":
-        inner = _inline_markup(node)
-        href = node.attrib.get("href")
-        if href:
-            return f"{inner} ({_escape_xml(href)})"
-        return inner
-    if tag == "sub":
-        return f"<sub>{_inline_markup(node)}</sub>"
-    if tag == "sup":
-        return f"<sup>{_inline_markup(node)}</sup>"
-    return _inline_markup(node)
-
-
-def _list_items_from_elements(elements: Iterable[ET.Element], styles: dict) -> List[ListItem]:
-    items: List[ListItem] = []
-    for li in elements:
-        text = _inline_markup(li).strip()
-        if not text:
-            continue
-        items.append(ListItem(Paragraph(text, styles["ListBody"])))
-    return items
-
-
-def _element_to_flowables(element: ET.Element, styles: dict, font_name: str) -> List:
-    tag = element.tag.lower()
-    flowables: List = []
-
-    if tag in {"p", "span", "div"}:
-        raw_text = "".join(element.itertext()).strip()
-        markup = _inline_markup(element).strip()
-        if not markup:
-            return [Spacer(1, 6)]
-        if raw_text.startswith("$$") and raw_text.endswith("$$") and raw_text.count("$$") >= 2:
-            flowables.append(Preformatted(raw_text, styles["Code"]))
-        else:
-            flowables.append(Paragraph(markup, styles["Body"]))
-        return flowables
-
-    if tag in {"h1", "h2", "h3"}:
-        heading_style = {
-            "h1": styles["Heading1"],
-            "h2": styles["Heading2"],
-            "h3": styles.get("Heading3", styles["Heading2"]),
-        }[tag]
-        flowables.append(Paragraph(_inline_markup(element), heading_style))
-        return flowables
-
-    if tag in {"ul", "ol"}:
-        items = _list_items_from_elements(element.findall("li"), styles)
-        if not items:
-            return []
-        bullet_type = "bullet" if tag == "ul" else "1"
-        start = element.attrib.get("start") or "1"
-        try:
-            start_value: Optional[int] = int(start) if tag == "ol" else None
-        except ValueError:
-            start_value = 1
-        flowables.append(
-            ListFlowable(
-                items,
-                bulletType=bullet_type,
-                bulletFontName=font_name,
-                bulletFontSize=11,
-                bulletChar="•" if tag == "ul" else None,
-                leftIndent=12,
-                start=start_value,
-            )
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
         )
-        flowables.append(Spacer(1, 6))
-        return flowables
 
-    if tag == "pre":
-        code_text = "\n".join(line.rstrip() for line in element.itertext()).strip("\n")
-        flowables.append(Preformatted(code_text or " ", styles["Code"]))
-        return flowables
+        if result.returncode != 0 or not pdf_path.exists():
+            LOGGER.error("Pandoc export failed: %s", result.stderr.strip())
+            raise RuntimeError("Failed to export PDF via pandoc")
 
-    if tag == "code":
-        code_text = "".join(element.itertext())
-        flowables.append(Preformatted(code_text, styles["Code"]))
-        return flowables
-
-    if tag == "blockquote":
-        markup = _inline_markup(element).strip()
-        if markup:
-            flowables.append(Paragraph(markup, styles["BlockQuote"]))
-            flowables.append(Spacer(1, 4))
-        return flowables
-
-    if tag == "table":
-        rows: List[str] = []
-        for tr in element.findall("tr"):
-            cells = [" ".join(td.itertext()).strip() for td in tr]
-            rows.append(" | ".join(cell for cell in cells if cell))
-        for row in rows:
-            if row:
-                flowables.append(Paragraph(_escape_xml(row), styles["Body"]))
-        if rows:
-            flowables.append(Spacer(1, 6))
-        return flowables
-
-    # Fallback: treat unknown element as paragraph
-    markup = _inline_markup(element).strip()
-    if markup:
-        flowables.append(Paragraph(markup, styles["Body"]))
-    else:
-        flowables.append(Spacer(1, 4))
-    return flowables
+        return BytesIO(pdf_path.read_bytes())
 
 
-def _markdown_to_flowables(feedback: str, styles: dict, font_name: str) -> List:
-    md = Markdown(extensions=MD_EXTENSIONS, output_format="xhtml1")
-    html = md.convert(feedback or "")
-    md.reset()
+def _build_estimation_markdown(score: Optional[str], feedback: str) -> str:
+    timestamp = datetime.utcnow().strftime("%d.%m.%Y %H:%M:%S")
+    lines = [
+        "# Результат оценки",
+        f"*Дата:* {timestamp}",
+    ]
+    if score:
+        lines.append(f"*Оценка:* **{score}**")
 
-    if not html.strip():
-        return []
+    lines.extend([
+        "",
+        "## Обратная связь",
+        feedback.strip() or "_Нет обратной связи._",
+    ])
 
-    try:
-        root = ET.fromstring(f"<root>{html}</root>")
-    except ET.ParseError:
-        return [Paragraph(_escape_xml(feedback), styles["Body"])]
-
-    flowables: List = []
-    for child in root:
-        flowables.extend(_element_to_flowables(child, styles, font_name))
-    return flowables
+    return "\n".join(lines)
 
 
 def _refresh_models() -> None:
@@ -433,40 +187,8 @@ def export_all_conversations():
 
 
 def _create_estimation_pdf(score: Optional[str], feedback: str) -> BytesIO:
-    font_name = _ensure_pdf_font()
-    styles = _build_pdf_styles(font_name)
-    buffer = BytesIO()
-    doc = SimpleDocTemplate(
-        buffer,
-        pagesize=A4,
-        leftMargin=20 * mm,
-        rightMargin=20 * mm,
-        topMargin=25 * mm,
-        bottomMargin=25 * mm,
-    )
-
-    story: List = []
-    story.append(Paragraph("Результат оценки", styles["Heading1"]))
-    story.append(Spacer(1, 10))
-
-    timestamp = datetime.utcnow().strftime("%d.%m.%Y %H:%M:%S")
-    story.append(Paragraph(f"Дата: {timestamp}", styles["Meta"]))
-    if score:
-        story.append(Paragraph(f"Оценка: <b>{_escape_xml(score)}</b>", styles["Meta"]))
-    story.append(Spacer(1, 12))
-
-    story.append(Paragraph("Обратная связь:", styles["Heading2"]))
-    story.append(Spacer(1, 6))
-
-    flowables = _markdown_to_flowables(feedback or "", styles, font_name)
-    if flowables:
-        story.extend(flowables)
-    else:
-        story.append(Paragraph("Нет обратной связи.", styles["Body"]))
-
-    doc.build(story)
-    buffer.seek(0)
-    return buffer
+    markdown_body = _build_estimation_markdown(score, feedback)
+    return _render_markdown_to_pdf(markdown_body)
 
 
 @app.post("/api/estimation/export")
@@ -478,7 +200,10 @@ def export_estimation_result():
 
     score = payload.get("score")
     score_text = str(score).strip() if score is not None else ""
-    buffer = _create_estimation_pdf(score_text, feedback)
+    try:
+        buffer = _create_estimation_pdf(score_text or None, feedback)
+    except RuntimeError as err:
+        return jsonify({"error": str(err)}), 500
     timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     filename = f"estimation_{timestamp}.pdf"
     return send_file(

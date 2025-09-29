@@ -7,7 +7,7 @@ A simple tutor-style chat application that lets a student converse with a Gemini
 - Turn-by-turn logging of conversations (JSON per dialog + JSONL log).
 - Optional upload of task and solution images at dialog start.
 - Configuration panel to update the Gemini model name and tutor prompt; the Gemini API key is read from the `GEMINI_API` environment variable.
-- Separate panel to request automatic grading of a student's work using a configurable estimation template, with one-click PDF export of the (Markdown/LaTeX-friendly) feedback.
+- Separate panel to request automatic grading of a student's work using a configurable estimation template, with one-click PDF export that preserves Markdown and LaTeX.
 - Automatically fetches the list of available Gemini models on startup and exposes them in the settings dropdown.
 - Resizable layout lets you shrink the chat area to expand the settings or estimation panel when it is open.
 - Conversation export panel lets you browse saved dialogs, preview them, and download either a single transcript (plain text) or the entire history as an XLSX workbook.
@@ -36,7 +36,7 @@ Configuration is stored in `config.json`. The application exposes `/api/config` 
 ## Student Work Estimation
 - Open the "Оценить работу" panel and optionally provide task text/images and the student's work.
 - Press "Оценить" to send the filled template to the LLM; results show the extracted score (`1-5`) and full feedback.
-- Use "Экспорт результата" to download the feedback section as a PDF document.
+- Use "Экспорт результата" to download the feedback section as a PDF document rendered through Pandoc/LaTeX (supports Markdown and math notation).
 - Uploaded images are stored alongside other runtime uploads, and each estimation is logged in `data/conversations.log` with the rendered prompt and response.
 
 ## Conversation Export
@@ -53,3 +53,8 @@ Both directories contain a `.gitkeep` file so the structure exists without commi
 
 ## Frontend Build
 The frontend is a simple static bundle (`frontend/` with HTML/CSS/JS) served directly by Flask; no build step is required.
+- Ensure Pandoc and a TeX engine are installed (for Markdown/LaTeX PDF export). On Gentoo:
+  ```bash
+  sudo emerge --ask app-text/texlive app-text/pandoc
+  ```
+  Pandoc's `xelatex` engine is used by default; override via `PANDOC_TEX_ENGINE` if needed.
