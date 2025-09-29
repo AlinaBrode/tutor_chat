@@ -99,3 +99,16 @@ Your task is to come up with the next message to a student.
   * parse model's reaction, extract next word after "score", place it into "score" field
   * the whole model's response put into "estimation" field of the form
   * make log entry for work estimation on the same level as dialog 
+
+
+# Conversation export
+
+## Placement
+* add a button "Export conversations" alongside the existing controls
+* clicking the button opens a side panel similar to the settings or estimation panel
+
+## Functionality
+* request the list of stored conversations (id, creation timestamp, first user message)
+* allow the user to pick a conversation from a dropdown list
+* render a preview that shows the prompt and all turns as "Teacher" / "Student" lines
+* provide a "Download conversation" button that saves the rendered text as a plain-text file

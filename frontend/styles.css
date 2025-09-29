@@ -211,6 +211,41 @@ button.primary:not(:disabled):hover {
   white-space: pre-wrap;
 }
 
+.export-panel .export-panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
+}
+
+.export-panel select {
+  width: 100%;
+}
+
+.export-preview-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.export-preview {
+  flex: 1;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: #f7f7fb;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  font-family: 'Fira Mono', 'Courier New', monospace;
+  font-size: 0.92rem;
+  line-height: 1.4;
+}
+
+.export-panel .config-actions {
+  margin-top: auto;
+}
+
 .config-panel label {
   display: flex;
   flex-direction: column;

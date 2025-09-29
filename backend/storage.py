@@ -104,6 +104,24 @@ def list_messages(conversation_id: str) -> List[Dict]:
     return load_conversation(conversation_id).get("messages", [])
 
 
+def list_conversations_metadata() -> List[Dict]:
+    conversations = []
+    for path in sorted(CONVERSATIONS_DIR.glob("*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        conversation_id = data.get("id") or path.stem
+        first_message = next((msg for msg in data.get("messages", []) if msg.get("role") == "user"), None)
+        conversations.append({
+            "id": conversation_id,
+            "created_at": data.get("created_at"),
+            "first_user_message": (first_message or {}).get("content", ""),
+        })
+    conversations.sort(key=lambda item: item.get("created_at") or "", reverse=True)
+    return conversations
+
+
 def _append_log_entry(entry: Dict) -> None:
     with _log_lock:
         with LOG_PATH.open("a", encoding="utf-8") as fp:

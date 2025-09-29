@@ -5,12 +5,17 @@ document.addEventListener('DOMContentLoaded', () => {
   const startDialogBtn = document.getElementById('start-dialog-btn');
   const toggleConfigBtn = document.getElementById('toggle-config-btn');
   const toggleEstimationBtn = document.getElementById('toggle-estimation-btn');
+  const toggleExportBtn = document.getElementById('toggle-export-btn');
   const configPanel = document.getElementById('config-panel');
   const configForm = document.getElementById('config-form');
   const modelSelect = document.getElementById('model-name');
   const estimationPanel = document.getElementById('estimation-panel');
   const estimationForm = document.getElementById('estimation-form');
   const panelResizer = document.getElementById('panel-resizer');
+  const exportPanel = document.getElementById('export-panel');
+  const exportSelect = document.getElementById('export-conversation-select');
+  const exportPreview = document.getElementById('export-preview');
+  const downloadConversationBtn = document.getElementById('download-conversation-btn');
   const newDialogModal = document.getElementById('new-dialog-modal');
   const newDialogForm = document.getElementById('new-dialog-form');
   const cancelDialogBtn = document.getElementById('cancel-dialog-btn');
@@ -35,6 +40,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const PANEL_MIN_WIDTH = 240;
   const PANEL_MAX_WIDTH = 640;
   const MIN_CHAT_WIDTH = 320;
+  let conversationsLoaded = false;
+  let conversationsLoading = false;
+  let exportConversations = [];
+  let exportCurrentConversationId = null;
+  let exportPreviewText = '';
 
   function typesetMath(target) {
     const elements = Array.isArray(target) ? target : [target];
@@ -150,6 +160,178 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
       showSidePanel(panel);
     }
+  }
+
+  function resetExportPreview(message = 'Выберите диалог, чтобы увидеть содержимое.') {
+    if (exportPreview) {
+      exportPreview.textContent = message;
+    }
+    exportPreviewText = '';
+    exportCurrentConversationId = null;
+    if (downloadConversationBtn) {
+      downloadConversationBtn.disabled = true;
+    }
+    if (exportSelect && !conversationsLoaded) {
+      exportSelect.value = '';
+    }
+  }
+
+  function formatConversationLabel(conversation) {
+    const rawDate = conversation.created_at;
+    let dateText = 'Без даты';
+    if (rawDate) {
+      const parsed = new Date(rawDate);
+      if (!Number.isNaN(parsed.getTime())) {
+        dateText = parsed.toLocaleString();
+      }
+    }
+    const snippet = (conversation.first_user_message || '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 80);
+    const suffix = snippet ? ` — ${snippet}${snippet.length === 80 ? '…' : ''}` : '';
+    return `${dateText}${suffix}`;
+  }
+
+  function populateConversationOptions(conversations = []) {
+    if (!exportSelect) {
+      return;
+    }
+    exportSelect.innerHTML = '';
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.disabled = true;
+    placeholder.textContent = conversations.length ? 'Выберите диалог' : 'Диалоги не найдены';
+    placeholder.selected = true;
+    exportSelect.appendChild(placeholder);
+
+    conversations.forEach((conversation) => {
+      if (!conversation?.id) {
+        return;
+      }
+      const option = document.createElement('option');
+      option.value = conversation.id;
+      option.textContent = formatConversationLabel(conversation);
+      exportSelect.appendChild(option);
+    });
+
+    exportSelect.disabled = conversations.length === 0;
+  }
+
+  async function fetchConversationList() {
+    if (conversationsLoaded || conversationsLoading || !exportSelect) {
+      return;
+    }
+    conversationsLoading = true;
+    try {
+      const res = await fetch('/api/conversations');
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.error || 'Не удалось получить список диалогов');
+      }
+      const data = await res.json();
+      exportConversations = Array.isArray(data.conversations) ? data.conversations : [];
+      conversationsLoaded = true;
+      populateConversationOptions(exportConversations);
+      resetExportPreview(
+        exportConversations.length
+          ? 'Выберите диалог, чтобы увидеть содержимое.'
+          : 'Сохранённых диалогов пока нет.'
+      );
+    } catch (err) {
+      console.error(err);
+      const message = err instanceof Error ? err.message : 'Не удалось получить список диалогов';
+      showToast(message, true);
+      populateConversationOptions([]);
+      resetExportPreview(message);
+    } finally {
+      conversationsLoading = false;
+    }
+  }
+
+  function buildConversationText(conversation) {
+    if (!conversation) {
+      return '';
+    }
+    const lines = [];
+    const prompt = conversation.prompt_template || '';
+    if (prompt) {
+      lines.push('Промпт:');
+      lines.push(prompt);
+      lines.push('');
+    }
+
+    const roleLabels = {
+      user: 'Ученик',
+      assistant: 'Учитель',
+      system: 'Система',
+    };
+
+    (conversation.messages || []).forEach((message) => {
+      if (!message?.content) {
+        return;
+      }
+      const label = roleLabels[message.role] || 'Сообщение';
+      lines.push(`${label}: ${message.content}`);
+      lines.push('');
+    });
+
+    return lines.join('\n').trim() || 'Диалог пуст.';
+  }
+
+  function updateExportPreviewText(text, conversationId) {
+    exportPreviewText = text;
+    exportCurrentConversationId = conversationId;
+    if (exportPreview) {
+      exportPreview.textContent = text;
+    }
+    if (downloadConversationBtn) {
+      downloadConversationBtn.disabled = !text;
+    }
+  }
+
+  async function loadConversationForExport(conversationId) {
+    if (!conversationId) {
+      resetExportPreview();
+      return;
+    }
+    if (exportPreview) {
+      exportPreview.textContent = 'Загружаем диалог…';
+    }
+    if (downloadConversationBtn) {
+      downloadConversationBtn.disabled = true;
+    }
+    try {
+      const res = await fetch(`/api/conversations/${conversationId}/export`);
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.error || 'Не удалось загрузить диалог');
+      }
+      const data = await res.json();
+      const conversation = data.conversation;
+      const text = buildConversationText(conversation);
+      updateExportPreviewText(text, conversationId);
+    } catch (err) {
+      console.error(err);
+      const message = err instanceof Error ? err.message : 'Не удалось загрузить диалог';
+      showToast(message, true);
+      resetExportPreview(message);
+    }
+  }
+
+  function downloadConversation() {
+    if (!exportPreviewText || !exportCurrentConversationId) {
+      return;
+    }
+    const blob = new Blob([exportPreviewText], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `conversation_${exportCurrentConversationId}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   }
 
   function populateModelOptions(preferredValue = '') {
@@ -549,13 +731,40 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  if (toggleExportBtn) {
+    toggleExportBtn.addEventListener('click', async () => {
+      const willOpen = currentSidePanel !== exportPanel || (exportPanel && exportPanel.classList.contains('hidden'));
+      togglePanel(exportPanel);
+      if (willOpen && exportPanel && !exportPanel.classList.contains('hidden')) {
+        await fetchConversationList();
+      }
+    });
+  }
+
   configForm.addEventListener('submit', saveConfig);
 
   if (estimationForm) {
     estimationForm.addEventListener('submit', submitEstimation);
   }
 
+  if (exportSelect) {
+    exportSelect.addEventListener('change', (event) => {
+      const selectedId = event.target.value;
+      if (!selectedId) {
+        resetExportPreview();
+        return;
+      }
+      loadConversationForExport(selectedId);
+    });
+  }
+
+  if (downloadConversationBtn) {
+    downloadConversationBtn.addEventListener('click', downloadConversation);
+  }
+
   populateModelOptions();
+  populateConversationOptions([]);
+  resetExportPreview();
 
   (async () => {
     await fetchModels();

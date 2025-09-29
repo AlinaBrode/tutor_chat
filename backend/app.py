@@ -106,6 +106,23 @@ def get_models():
     return jsonify({"models": _AVAILABLE_MODELS})
 
 
+@app.get("/api/conversations")
+def list_conversations():
+    return jsonify({"conversations": storage.list_conversations_metadata()})
+
+
+@app.get("/api/conversations/<conversation_id>/export")
+def export_conversation(conversation_id: str):
+    try:
+        conversation = storage.load_conversation(conversation_id)
+    except storage.ConversationNotFound:
+        return jsonify({"error": "Conversation not found"}), 404
+
+    return jsonify({
+        "conversation": conversation,
+    })
+
+
 @app.put("/api/config")
 def put_config():
     data = request.get_json(force=True)

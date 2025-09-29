@@ -22,6 +22,7 @@
       <button id="start-dialog-btn" class="primary">Начать новый диалог</button>
       <button id="toggle-config-btn">Настройки</button>
       <button id="toggle-estimation-btn">Оценить работу</button>
+      <button id="toggle-export-btn">Экспорт диалогов</button>
     </div>
   </header>
 
@@ -91,6 +92,25 @@
         </div>
         <p class="hint">Шаблон берётся из настройки estimation_template. Ответ должен содержать строку "score".</p>
       </form>
+    </aside>
+
+    <aside id="export-panel" class="config-panel hidden export-panel">
+      <div class="export-panel-body">
+        <h2>Экспорт диалогов</h2>
+        <label>
+          Выберите диалог
+          <select id="export-conversation-select">
+            <option value="" disabled selected>Диалоги не загружены</option>
+          </select>
+        </label>
+        <div class="export-preview-container">
+          <h3>Предпросмотр</h3>
+          <pre id="export-preview" class="export-preview">Выберите диалог, чтобы увидеть содержимое.</pre>
+        </div>
+        <div class="config-actions">
+          <button id="download-conversation-btn" class="primary" type="button" disabled>Скачать диалог</button>
+        </div>
+      </div>
     </aside>
   </main>
 

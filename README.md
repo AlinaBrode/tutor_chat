@@ -10,6 +10,7 @@ A simple tutor-style chat application that lets a student converse with a Gemini
 - Separate panel to request automatic grading of a student's work using a configurable estimation template.
 - Automatically fetches the list of available Gemini models on startup and exposes them in the settings dropdown.
 - Resizable layout lets you shrink the chat area to expand the settings or estimation panel when it is open.
+- Conversation export panel lets you browse saved dialogs, preview them, and download the full transcript as plain text.
 
 ## Getting Started
 1. Create and activate a Python 3.10+ virtual environment.
@@ -36,6 +37,11 @@ Configuration is stored in `config.json`. The application exposes `/api/config` 
 - Open the "Оценить работу" panel and optionally provide task text/images and the student's work.
 - Press "Оценить" to send the filled template to the LLM; results show the extracted score (`1-5`) and full feedback.
 - Uploaded images are stored alongside other runtime uploads, and each estimation is logged in `data/conversations.log` with the rendered prompt and response.
+
+## Conversation Export
+- Open the "Экспорт диалогов" panel to load archived conversations.
+- Pick a dialog from the dropdown (entries show start time and first user message) to view the prompt and turn-by-turn transcript.
+- Use "Скачать диалог" to download the rendered transcript as UTF-8 plain text.
 
 ## Data Storage
 - Conversations are saved under `data/conversations/` as JSON files.
