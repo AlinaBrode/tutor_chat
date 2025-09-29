@@ -57,6 +57,33 @@ def _ensure_pdf_font() -> str:
     return "Helvetica"
 
 
+MD_HEADING_PATTERN = re.compile(r"^\s{0,3}#{1,6}\s+", re.MULTILINE)
+MD_BULLET_PATTERN = re.compile(r"^(\s*)([-*+]\s+)", re.MULTILINE)
+MD_ORDERED_PATTERN = re.compile(r"^(\s*)\d+\.\s+", re.MULTILINE)
+
+
+def _markdown_to_plain(text: str) -> str:
+    cleaned = text.replace("\r\n", "\n")
+
+    def _strip_code_block(match: re.Match[str]) -> str:
+        code = match.group(1).strip("\n")
+        return f"\n{code}\n"
+
+    cleaned = re.sub(r"```(.*?)```", _strip_code_block, cleaned, flags=re.DOTALL)
+    cleaned = re.sub(r"`([^`]+)`", r"\1", cleaned)
+    cleaned = re.sub(r"\*\*(.*?)\*\*", r"\1", cleaned)
+    cleaned = re.sub(r"\*(.*?)\*", r"\1", cleaned)
+    cleaned = re.sub(r"__(.*?)__", r"\1", cleaned)
+    cleaned = re.sub(r"_(.*?)_", r"\1", cleaned)
+
+    cleaned = MD_HEADING_PATTERN.sub("", cleaned)
+    cleaned = MD_BULLET_PATTERN.sub(lambda m: f"{m.group(1)}• ", cleaned)
+    cleaned = MD_ORDERED_PATTERN.sub(lambda m: f"{m.group(1)}• ", cleaned)
+    cleaned = cleaned.replace("> ", "")
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
 def _refresh_models() -> None:
     global _AVAILABLE_MODELS
     _AVAILABLE_MODELS = list_available_models()
@@ -165,6 +192,7 @@ def export_all_conversations():
 
 def _create_estimation_pdf(score: Optional[str], feedback: str) -> BytesIO:
     font_name = _ensure_pdf_font()
+    plain_feedback = _markdown_to_plain(feedback)
     buffer = BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
@@ -193,7 +221,7 @@ def _create_estimation_pdf(score: Optional[str], feedback: str) -> BytesIO:
     pdf.setFont(font_name, 11)
     available_width = width - 2 * margin
     lines = []
-    for block in feedback.splitlines() or [""]:
+    for block in plain_feedback.splitlines() or [""]:
         wrapped = simpleSplit(block or " ", font_name, 11, available_width)
         lines.extend(wrapped or [" "])
         lines.append("")  # blank line between paragraphs
