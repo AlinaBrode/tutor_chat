@@ -58,3 +58,8 @@ The frontend is a simple static bundle (`frontend/` with HTML/CSS/JS) served dir
   sudo emerge --ask app-text/texlive app-text/pandoc
   ```
   Pandoc's `xelatex` engine is used by default; override via `PANDOC_TEX_ENGINE` if needed.
+- Install Unicode fonts with Cyrillic support (defaults expect Noto):
+  ```bash
+  sudo emerge --ask media-fonts/noto media-fonts/noto-cjk media-fonts/noto-emoji
+  ```
+  You can point Pandoc to different fonts using `PANDOC_EXTRA_OPTS`, e.g. `-V mainfont="Liberation Serif"`.

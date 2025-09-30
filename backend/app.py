@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import logging
+import os
+import subprocess
+import tempfile
 import re
 import uuid
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
 from typing import List, Optional, Tuple
+import shlex
 
 from flask import Flask, jsonify, request, send_file, send_from_directory
 from jinja2 import Template
@@ -30,6 +34,16 @@ app = Flask(
 _AVAILABLE_MODELS: List[dict] = []
 PANDOC_BINARY = os.getenv("PANDOC_PATH", "pandoc")
 PANDOC_TEX_ENGINE = os.getenv("PANDOC_TEX_ENGINE", "xelatex")
+DEFAULT_PANDOC_OPTIONS = [
+    "-V",
+    "lang=ru",
+    "-V",
+    "mainfont=Noto Serif",
+    "-V",
+    "sansfont=Noto Sans",
+    "-V",
+    "monofont=Noto Sans Mono",
+]
 
 
 def _render_markdown_to_pdf(markdown_text: str) -> BytesIO:
@@ -48,6 +62,12 @@ def _render_markdown_to_pdf(markdown_text: str) -> BytesIO:
             "--pdf-engine",
             PANDOC_TEX_ENGINE,
         ]
+
+        command.extend(DEFAULT_PANDOC_OPTIONS)
+
+        extra_opts = os.getenv("PANDOC_EXTRA_OPTS")
+        if extra_opts:
+            command.extend(shlex.split(extra_opts))
 
         result = subprocess.run(
             command,
